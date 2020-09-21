@@ -8,9 +8,7 @@
     "socket.io": "^2.3.0",
     "nodemon": "^2.0.4"
   },
-  "devDependencies": {
-    
-  },
+  "devDependencies": {},
   "scripts": {
     "start": "node index",
     "server": "nodemon index",

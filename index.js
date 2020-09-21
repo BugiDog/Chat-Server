@@ -4,20 +4,20 @@ const io = require('socket.io').listen(server)
 
 const MessageGenerator = require('./Functions/MessageGenerator')
 
-const chatRooms = new Map([
-    ['userInRoom', new Map()],
-    ['rooms', new Map()]
-])
-const rooms = chatRooms.get('rooms')
-const userInRoom = chatRooms.get('userInRoom')
+const chatRooms = new Map()
+
 
 const sendChatRoomData = (socket, roomId) => {
     socket.emit('ChatRoomData', {
         roomId,
-        usersNames: [...rooms.get(roomId).get('users').values()],
-        messages: [...rooms.get(roomId).get('message')]
+        usersNames: [...chatRooms.get(roomId).get('users').values()],
+        messages: [...chatRooms.get(roomId).get('message')]
     })
 }
+
+const idGenerator = () => {
+    return Math.random().toString(36).substr(2, 9);
+};
 
 io.on('connection', (socket) => {
 
@@ -27,47 +27,63 @@ io.on('connection', (socket) => {
         console.log('createChatRoom=', userName);
 
         const roomId = new Date().getTime().toString()
-        console.log(typeof (roomId));
-        rooms.set(roomId,
+        chatRooms.set(roomId,
             new Map([
                 ['users', new Map()],
                 ['message', []]
-            ]) 
+            ])
         )
         socket.join(roomId)
-        userInRoom.set(socket.id, roomId)
-        rooms.get(roomId).get('users').set(socket.id, userName)
+        const newUserId = idGenerator()
+        chatRooms.get(roomId).get('users').set(newUserId, userName)
         sendChatRoomData(socket, roomId)
+        socket.emit('userId', newUserId)
     })
- 
+
     socket.on('joinChatRoom', ({ userName, roomId }) => {
         console.log('joinChatRoom=', userName, '---', roomId);
 
-        if (rooms.has(roomId)){
+        if (chatRooms.has(roomId)) {
             socket.join(roomId)
-            console.log(rooms.get(roomId));
-            rooms.get(roomId).get('users').set(socket.id, userName)
+            const newUserId = idGenerator()
+            chatRooms.get(roomId).get('users').set(newUserId, userName)
             sendChatRoomData(socket, roomId)
+            socket.emit('userId', newUserId)
             socket.broadcast.to(roomId).emit('newUser', userName)
         } else {
             console.log('ERROR=', 'Room not found');
-            socket.emit('newError', {message:'Room not found'})
+            socket.emit('newError', { message: 'Room not found' })
             return 0
         }
-
-        
     })
 
-    socket.on('sendMessage', ({ textMessage, roomId }) => {
+    socket.on('reconnectToRoom', (userId) => {
+        console.log('reconnectToRoom=', '---', userId);
 
+        for (let [key, room] of chatRooms) {
+            if (room.get('users').has(userId)) {
+                socket.join(key)
+                sendChatRoomData(socket, key)
+            }
+        } 
+    })
+
+    socket.on('sendMessage', ({ textMessage, roomId, userId }) => {
         console.log('sendMessage=', textMessage, '---', roomId);
-        const message = MessageGenerator(textMessage,rooms.get(roomId).get('users').get(socket.id))
-        rooms.get(roomId).get('message').push(message)
+
+        const message = MessageGenerator(textMessage, chatRooms.get(roomId).get('users').get(userId))
+        chatRooms.get(roomId).get('message').push(message)
         message.date = new Date(message.date).toTimeString().split('', 5).join('')
-        console.log('message=',message);
-        io.in(roomId).emit('newMessage',{ message})
-    
-    })    
+        io.in(roomId).emit('newMessage', { message })
+    }) 
 
+    socket.on('disconnectUser', ({userId, roomId}) => {
+        console.log('disconnectUser=', userId,'---',roomId );
 
+        
+        socket.leave(roomId)
+        socket.broadcast.to(roomId).emit('userDisconnect',  chatRooms.get(roomId).get('users').get(userId))
+        chatRooms.get(roomId).get('users').delete(userId)
+   
+    })
 })
